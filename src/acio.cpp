@@ -62,7 +62,7 @@ int ACIO::update(){
     if(_serial->available() >= ACIO_MIN_SIZE){
         // Wait for 6 bytes in serial buffer before processing.
         _lastReceivedTime = millis();
-        return readRequest(_rxBuffer);
+        return readFrame(_rxBuffer);
     } else if ((millis() - _lastReceivedTime) > ACIO_TIMEOUT_PERIOD){
         #ifdef ACIO_ERROR
             DBG_SERIAL.println("ACIO Error: Bus went quiet, no messages for a long time. (bad baud?)");
@@ -80,7 +80,7 @@ void ACIO::reset(){
     _ACIOready = false;
 }
 
-int ACIO::readRequest(ACIO_Frame &_frame){
+int ACIO::readFrame(ACIO_Frame &_frame){
     do {
         byte dataIn = readByte();
         switch(_frame->currentByte){
@@ -106,22 +106,51 @@ int ACIO::readRequest(ACIO_Frame &_frame){
             break;
             case 4:
                 // Data Length
-                _frame->numBute = dataIn;
+                _frame->numBytes = dataIn;
             break;
             default:
-                // Data bytes from here onwards.
-                _frame->data[currentByte] = dataIn;
+                // Data bytes from here onwards except for sum byte as last byte.
+                if(_frame->numBytes-1 == _frame->currentByte){
+                    _frame->sumByte = dataIn;
+                } else {
+                    _frame->data[_frame->currentByte] = dataIn;
+                }
             break;
         }
         _frame->currentByte++;
     } while(_serial->available());
 
-    if(_frame->fullyReceived){
+    if(_frame->numBytes == _frame->currentByte){
         // Only do something when true
-        return 1;
+        uint8_t sum = calcSumByte(_frame);
+        if(_frame->sumByte == sum){
+            return 1;
+        } else {
+            #ifdef ACIO_ERROR
+            DBG_SERIAL.println("ACIO Error: Checksum failed on incoming packet.");
+            DBG_SERIAL.print("Expected 0x");
+            DBG_SERIAL.print(_frame->sumByte);
+            DBG_SERIAL.print(" but calculated: ");
+            DBG_SERIAL.println(sum);
+            #endif
+            return -1;
+        }
     }
     
     return 0;
+}
+
+int ACIO::writeFrame(ACIO_Frame &_frame){
+    _serial->write(_frame->preamble);   // Start of Frame
+    _serial->write(_frame->nodeID);
+    _serial->write(_frame->command);
+    _serial->write(_frame->frameID);
+    _serial->write(_frame->numBytes);
+    for(int i = 0; i < (_frame->numBytes - 6); i++){
+        _serial->write(_frame->data[i]);
+    }
+    _serial->write(_frame->sumByte);
+    _serial->flush();
 }
 
 byte ACIO::readByte(){
@@ -133,7 +162,7 @@ byte ACIO::readByte(){
     switch(data){
         case 0xAA:
             if(byteCount == 0){
-                _serial->write(0xAA);
+                _serial->write(0xAA);   // To next node in ring
             }
             byteCount = 0;
             break;
@@ -186,4 +215,28 @@ long ACIO::autodetectBaud(){
 
     // Valid baudrate has been detected, and port is open at correct baudrate
     return baudrates[i];
+}
+
+uint8_t ACIO::calcSumByte(ACIO_Frame &_frame){
+    byte sum = 0;
+
+    if(_frame == NULL){
+        #ifdef ACIO_ERROR
+        DBG_SERIAL.println("ACIO Error: checkSum got a NULL frame.");
+        #endif
+        return 0;
+    }
+
+    sum += _frame->preamble;
+    sum += _frame->nodeID;
+    sum += _frame->command;
+    sum += _frame->frameID;
+    sum += _frame->numBytes;
+    for (int i=0; i < _frame->numBytes-1; i++)
+    {
+        sum += _frame->data[i];
+    }
+
+
+    return sum;
 }

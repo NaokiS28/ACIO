@@ -1,7 +1,7 @@
 // ACIO Protocol library
 // NKS - 2022
 // Based on work by Nadeflore/ACreal_IO
-// https://github.com/Nadeflore/ACreal_IO/blob/master/
+// https://github.com/Nadeflore/ACreal_IO
 
 #ifndef ACIO_H
 #define ACIO_H
@@ -44,7 +44,8 @@ struct ACIO_Frame {
     uint8_t frameID = 0x00;
     uint8_t numBytes = 0;
     uint8_t currentByte = 0;          // ACIO is minimum 6 bytes long, plus however many data bytes are specified.
-    uint8_t data[256];             // Data byte buffer. Probably way more than actually needed.
+    uint8_t data[250];             // Data byte buffer. Probably way more than actually needed.
+    uint8_t sumByte = 0;
 };
 
 class ACIO {
@@ -56,7 +57,8 @@ class ACIO {
     int begin();
     int begin(bool waitForBaud, int bR = 19200);
     int update();
-    int readRequest(ACIO_Frame &_frame);
+    int readFrame(ACIO_Frame &_frame);
+    int writeFrame(ACIO_Frame &_frame);
     long autodetectBaud();
 
     void disableAutoRestart(bool s){_disableRestart = s};   // Pass true to disable auto-restarting the bus
@@ -72,5 +74,6 @@ class ACIO {
     const long _baudrates[] = {57600,38400,19200};     // ACIO baudrates supported
     unsigned long _lastReceivedTime = 0;               // If timeout is exceeded, reset self
 
+    byte calcSumByte(ACIO_Frame &_frame);
     byte readByte();
 }
